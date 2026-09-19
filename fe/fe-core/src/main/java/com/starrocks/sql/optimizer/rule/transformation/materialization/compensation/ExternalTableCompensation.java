@@ -208,15 +208,21 @@ public final class ExternalTableCompensation extends TableCompensation {
                 Column mvColumn = mvPartitionCols.get(i);
                 LiteralExpr literalExpr = literalExprs.get(i);
                 ColumnRefOperator refPartitionColRef = refPartitionColRefs.get(i);
-                ConstantOperator expectPartitionVal =
-                        (ConstantOperator) SqlToScalarOperatorTranslator.translate(literalExpr);
-                if (!mvColumn.isGeneratedColumn()) {
+                Column refColumn = refBaseTablePartitionCols.get(i);
+                // A time transform (year/month/day/hour) needs a range predicate: an equality on the raw column would
+                // only match the first instant of the partition (eg. midnight for `day(ts)`), and the generated column
+                // that used to select this path only exists when a timezone adjustment was applied.
+                PartitionField partitionField = icebergTable.getPartitionField(refColumn.getName());
+                boolean isTimeTransform = partitionField != null
+                        && partitionField.transform().dedupName().equalsIgnoreCase("time");
+                if (!mvColumn.isGeneratedColumn() && !isTimeTransform) {
+                    ConstantOperator expectPartitionVal =
+                            (ConstantOperator) SqlToScalarOperatorTranslator.translate(literalExpr);
                     ScalarOperator eq = new BinaryPredicateOperator(BinaryType.EQ, refPartitionColRef,
                             expectPartitionVal);
                     predicates.add(eq);
                 } else {
                     SlotRef refBaseTablePartitionExpr = refBaseTableSlotRefs.get(i);
-                    Column refColumn = refBaseTablePartitionCols.get(i);
                     Expr predicateExpr = getIcebergTablePartitionPredicateExpr(icebergTable,
                             refColumn.getName(), refBaseTablePartitionExpr, literalExpr);
                     ExpressionAnalyzer.analyzeExpression(predicateExpr, analyzeState, scope, ConnectContext.get());
